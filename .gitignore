@@ -1,0 +1,11 @@
+/input
+input/
+./input
+input/*
+data
+./data
+data/
+data/*
+best_model.h5
+.best_model.h5
+./.best_model.h5
