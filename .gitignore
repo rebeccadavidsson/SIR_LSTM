@@ -10,5 +10,7 @@ best_model.h5
 .best_model.h5
 ./.best_model.h5
 
-.ipynb_checkpoints
+./ipynb_checkpoints
+/ipynb_checkpoints
+ipynb_checkpoints/
 .DS_Store
