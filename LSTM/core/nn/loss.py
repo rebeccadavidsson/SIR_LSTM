@@ -19,12 +19,11 @@ def rmsle_error(source, candidate):
     error = error * error
     error = error.mean()
     error = np.sqrt(error)
-
     return error
 
 # =============================================== GRADIENT SMOOTH =====================================================
 class GradientSmoothLoss(nn.Module):
-    def __init__(self, refGrad, future, decayFunc = None):
+    def __init__(self, refGrad, future, decayFunc=None):
         '''
         Function that minimizes the rate of change of a time series prediction,
         as the times evolves. It tries to give a desired "shape".

@@ -19,6 +19,7 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 
 from sklearn.metrics       import mean_squared_log_error
+from sklearn.metrics       import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 
 from tqdm             import tqdm
@@ -27,11 +28,18 @@ from IPython.display  import display
 from torch import nn
 from torch import optim
 from torch.optim import lr_scheduler
+
+from scipy import optimize
+import datetime
+import math
+from hyperopt import fmin, tpe, hp, STATUS_OK
+
 from core.data      import compare_countries as cc
 from core.data      import utils             as dataUtils
 
 from core.nn        import WeightInitializer
 from core.nn.loss   import l1_norm_error
+from core.nn.loss   import rmsle_error
 from core.nn.loss   import GradientSmoothLoss
 
 from core.networks  import BasicRecurrentPredictor
@@ -41,31 +49,33 @@ torch.manual_seed(123)
 torch.cuda.manual_seed(123)
 np.random.seed(123)
 torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 DEVICE = 'cpu'
 
 
 class LSTM():
 
-    def __init__(self, COUNTRY, TRAIN_UP_TO, ThreshConf, ThreshDead, target,
-                 show_Figure=True):
+    def __init__(self, COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, 
+                ThreshDead, target, show_Figure=True):
         self.COUNTRY      = COUNTRY
         self.TRAIN_UP_TO  = TRAIN_UP_TO
-        self.ThreshConf   = ThreshConf
         self.ThreshDead   = ThreshDead
         self.target       = target
         self.show_Figure  = show_Figure
-        self.winSize      = 10
+        self.FUTURE_DAYS  = FUTURE_DAYS
+        self.winSize      = 7
         self.obsSize      = 5
         self.futureSteps  = 15
+        self.iterations   = 5
         self.supPredSteps = self.winSize - self.obsSize
         self.uPredSteps   = self.futureSteps - self.supPredSteps
         self.allPredSteps = self.futureSteps + self.obsSize
+        self.bestValData  = None
+        self.bestTrainData= None
+        self.bestPred     = None
+        self.lowestError  = 10e10
         self.df           = self.init_data()
-
-        print(f"Init LSTM model for {COUNTRY}, trained up to {TRAIN_UP_TO}, \
-                with a Confirmed Cases threshold of {self.ThreshConf}  \
-                and window size of {self.winSize}")
 
     def init_data(self):
         df = pd.read_csv('assets/covid_spread.csv', parse_dates=['Date'])
@@ -111,16 +121,17 @@ class LSTM():
         nn.utils.clip_grad_norm_(self.confModel.parameters(), 1.0)
         
         return loss
-        
-    def simulate(self):
+
+    def simulate(self, ThreshConf):
         """
         Run a LSTM model with given parameters and return the MAPE.
         """
-        print(self.ThreshConf, "threshold")
-        errorData  = cc.get_nearest_sequence(self.df, self.COUNTRY,
-                                        alignThreshConf=self.ThreshConf,
+        print(f"Init LSTM model for {self.COUNTRY}, trained up to {self.TRAIN_UP_TO}, with a Confirmed Cases threshold of {round(ThreshConf)}  and window size of {self.winSize}")
+
+        errorData = cc.get_nearest_sequence(self.df, self.COUNTRY,
+                                        alignThreshConf=ThreshConf,
                                         alignThreshDead=self.ThreshDead,
-                                        errorFunc  = l1_norm_error
+                                        errorFunc  = rmsle_error
                                         )
 
         confData = dataUtils.get_target_data(self.df, errorData,
@@ -182,10 +193,15 @@ class LSTM():
         self.confModel.to(DEVICE);
         self.confTrainData = self.confTrainData.to(DEVICE);
 
-        pBar = tqdm(range(10))
+        status = "ok"
+        pBar = tqdm(range(self.iterations))
         for i in pBar:
             loss = self.confOptim.step(self.conf_closure)
-            
+            if loss > 10:
+                print(loss)
+                status = "fail"
+                self.simulate(ThreshConf)
+                break
             # update tqdm to show loss and lr
             pBar.set_postfix({'Loss ' : loss.item(), 
                             'Lr'    : self.confOptim.param_groups[0]['lr']})
@@ -203,46 +219,127 @@ class LSTM():
 
         # make prediction
         self.confModel.returnFullSeq = False
-        pred   = self.confModel(confValData, future = 40).cpu().detach().numpy()
-        pred   = confScaler.inverse_transform(pred[0])
+        self.pred   = self.confModel(confValData, future = self.FUTURE_DAYS).cpu().detach().numpy()
+        self.pred   = confScaler.inverse_transform(self.pred[0])
 
-        error  = l1_norm_error(pred[:confValLabel.shape[0]], confValLabel.numpy())        
+        error  = rmsle_error(self.pred[:confValLabel.shape[0]], confValLabel.numpy())        
 
         # prediction
-        predDate = pd.date_range(start = self.TRAIN_UP_TO, periods=pred.shape[0])              
+        self.predDate = pd.date_range(start = self.TRAIN_UP_TO, periods=self.pred.shape[0])              
         # plot train data
-        showTrainData = confData[confData['Province_State'] == self.COUNTRY]
-        showTrainData = showTrainData[showTrainData['Date'] < self.TRAIN_UP_TO]
+        self.showTrainData = confData[confData['Province_State'] == self.COUNTRY]
+        self.showTrainData = self.showTrainData[self.showTrainData['Date'] < self.TRAIN_UP_TO]
         
         # plot val data
-        showValData = confData[confData['Province_State'] == self.COUNTRY]
-        showValData = showValData[showValData['Date'] >= self.TRAIN_UP_TO]
+        self.showValData = confData[confData['Province_State'] == self.COUNTRY]
+        self.showValData = self.showValData[self.showValData['Date'] >= self.TRAIN_UP_TO]
+
+        error = error.item()
+        if math.isnan(error):
+            status = "fail"
+            error = 10e10
+
+        if error <= self.lowestError or self.bestValData is None:
+            self.bestValData   = self.showValData
+            self.bestTrainData = self.showTrainData
+            self.bestPred      = self.pred
+            self.lowestError   = error
 
         if self.show_Figure:
-            self.plot(pred, predDate, showTrainData, showValData)
+            self.plot()
 
-        MAPE = error.item()
-        print("MAPE : %2.5f"% MAPE, ' (not normalized)')     
-        return MAPE
+        print("RMSLE : %2.5f"% error, ' (not normalized)')     
+        return {"loss": error, "status": status}
     
     def figureOptions(self, show_Figure):
         self.show_Figure = show_Figure
 
-    def optimizeTreshold(self, confRange):
-        for val in confRange:
-            self.ThreshConf = val
-            print(self.ThreshConf)
-            MAPE = self.simulate()
+    def _optimizeTreshold(self, confRange):
+        self.iterations = 5
+        results_dict = {}
+        for threshold in confRange:
+            print(threshold)
+            # Calculate mean of 5 runs
+            error_list = []
+            for i in range(5):
+                self.ThreshConf = threshold
+                error = self.simulate(threshold, show_Figure=False)
+                error_list.append(error)
+            results_dict[threshold] = np.mean(error_list)
+            print(results_dict)
+        return results_dict
     
-    def plot(self, pred, predDate, showTrainData, showValData):
+    def optimizeTreshold(self):
 
+        best = fmin(self.simulate,
+            space=hp.uniform('Threshold', 50, 105),
+            algo=tpe.suggest,
+            max_evals=6)
+        return best
+
+    
+    def plot(self, SIRdata=None):
+        showValData, showTrainData = self.bestValData, self.bestTrainData
+        pred, predDate = self.bestPred, self.predDate
+        date_until = self.TRAIN_UP_TO + datetime.timedelta(days=self.FUTURE_DAYS)
+        showValData = showValData[showValData["Date"] < date_until + datetime.timedelta(days=20)]
         fig, ax = plt.subplots(1, 1, figsize = (9, 4))
         ax.tick_params(axis='x', rotation=45)
         fig.suptitle(self.COUNTRY + ' confirmed cases prediction')
+        sns.lineplot(y = 'ConfirmedCases', x ='Date', data = showValData, ax = ax, linewidth=4.5);
         sns.lineplot(y = pred, x = predDate, ax = ax, linewidth=4.5)
         sns.lineplot(y = 'ConfirmedCases', x = 'Date', data = showTrainData, ax = ax, linewidth=4.5)
-        sns.lineplot(y = 'ConfirmedCases', x ='Date', data = showValData, ax = ax, linewidth=4.5);
-        ax.legend(['Pred', 'Train', 'Validation'])
+        
+        if SIRdata is not None:
+            SIRdata = SIRdata[SIRdata["Date"] < date_until]
+            sns.lineplot(y = 'New Confirmed', x ='Date', data = SIRdata, ax = ax, linewidth=4.5);
+            ax.legend(['Validation', 'Pred', 'Train', 'SIR'])
+        else:
+            ax.legend(['Validation', 'Pred', 'Train'])
         ax.axvline(x=self.TRAIN_UP_TO, ymin = 0.0, ymax = 1.0, linestyle='--', lw = 1, color = '#808080')
         ax.grid(True)
         plt.show()
+    
+    def accuracy(self, SIRdata=None, overTime=True):
+        end_date = self.TRAIN_UP_TO + datetime.timedelta(days=self.FUTURE_DAYS)
+        showValData, showTrainData = self.bestValData, self.bestTrainData
+        showValData = showValData[showValData["Date"] < end_date]
+        SIRdata = SIRdata[SIRdata["Date"] >= self.TRAIN_UP_TO]
+        SIRdata = SIRdata[SIRdata["Date"] <= end_date - datetime.timedelta(days=1)]
+       
+    
+        squared = False
+        if SIRdata is None:
+            dfOverTime = pd.DataFrame(columns=["lstm"])
+            y, ypred = showValData["ConfirmedCases"], self.bestPred
+            mse = mean_squared_error(y, ypred, squared=squared)
+            pd.DataFrame([[mse]], columns=["lstm"])
+        else:
+            total_mse, total_mse_SIR = [], []
+
+            predictions = pd.DataFrame()
+            predictions["Date"] = SIRdata["Date"]
+            predictions["Pred"] = self.bestPred
+
+            merged = pd.merge(SIRdata, showValData, how="inner", on="Date")
+            merged = pd.merge(merged, predictions, on="Date", how="inner")
+            y, ypred = merged["ConfirmedCases"], merged["Pred"]
+            mse = mean_squared_error(y, ypred, squared=squared)
+            y, ypred = merged["ConfirmedCases"], merged[self.target]
+            mse_SIR = mean_squared_error(y, ypred, squared=squared)
+            df = pd.DataFrame([[mse, mse_SIR]], columns=["lstm", "SIRF"])
+
+            for i in range(1, len(showValData) - 1):
+                y, ypred = merged["ConfirmedCases"].iloc[0:i], merged["Pred"][0:i]
+                mse = mean_squared_error(y, ypred, squared=squared)
+                y, ypred = merged["ConfirmedCases"].iloc[0:i], merged[self.target].iloc[0:i]
+                mse_SIR = mean_squared_error(y, ypred, squared=squared)
+                total_mse.append(mse)
+                total_mse_SIR.append(mse_SIR)
+            dfOverTime = pd.DataFrame()
+            dfOverTime["lstm"] = total_mse
+            dfOverTime["SIR"] = total_mse_SIR
+            
+
+        return df, dfOverTime
+        
