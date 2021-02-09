@@ -1,0 +1,2 @@
+,Type,Start,End,Population,ODE,Rt,rho,sigma,tau,1/gamma [day],1/beta [day],RMSLE,Trials,Runtime
+6th,Past,30Sep2020,01Feb2021,7800000000,SIR,1.33,0.00016617927555106834,0.00012523529568277155,6,33,25,0.03975923827594068,2499,3 min  1 sec

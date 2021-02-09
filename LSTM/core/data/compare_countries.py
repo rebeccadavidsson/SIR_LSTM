@@ -44,7 +44,7 @@ def get_nearest_sequence(df, state, alignThreshConf=50, alignThreshDead=10, erro
     :param alignThreshConf:     minimum number of confirmed cases
     :param alignThreshDead:     minimum number of fatalities
     :param errorFunc:           error to be applied
-    :return: dataframe containing the the error and the align index for each candidate country
+    :return: dataframe containing the the error and the align index for each candidate country 
     '''
     resDf  = pd.DataFrame(columns=['Province_State', 'deathError', 'confirmedError', 'deathIdx', 'confirmedIdx'])
     confDf = df[df['ConfirmedCases'] > alignThreshConf]

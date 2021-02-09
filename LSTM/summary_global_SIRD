@@ -1,0 +1,2 @@
+,Type,Start,End,Population,ODE,Rt,kappa,rho,sigma,tau,1/gamma [day],1/beta [day],1/alpha2 [day],RMSLE,Trials,Runtime
+6th,Past,30Sep2020,01Feb2021,7800000000,SIR-D,1.33,2.2161394453267023e-05,0.001327165196448338,0.000977040174556471,48,34,25,1504,0.03511922788320319,2433,3 min  1 sec

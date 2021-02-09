@@ -57,13 +57,14 @@ DEVICE = 'cpu'
 class LSTM():
 
     def __init__(self, COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, 
-                ThreshDead, target, show_Figure=True):
+                ThreshDead, target, TYPE, show_Figure=True):
         self.COUNTRY      = COUNTRY
         self.TRAIN_UP_TO  = TRAIN_UP_TO
         self.ThreshDead   = ThreshDead
         self.target       = target
         self.show_Figure  = show_Figure
         self.FUTURE_DAYS  = FUTURE_DAYS
+        self.TYPE         = TYPE
         self.winSize      = 7
         self.obsSize      = 5
         self.futureSteps  = 15
@@ -75,6 +76,7 @@ class LSTM():
         self.bestTrainData= None
         self.bestPred     = None
         self.lowestError  = 10e10
+        self.SIRdicts     = []
         self.df           = self.init_data()
 
     def init_data(self):
@@ -131,7 +133,7 @@ class LSTM():
         errorData = cc.get_nearest_sequence(self.df, self.COUNTRY,
                                         alignThreshConf=ThreshConf,
                                         alignThreshDead=self.ThreshDead,
-                                        errorFunc  = rmsle_error
+                                        errorFunc      = rmsle_error
                                         )
 
         confData = dataUtils.get_target_data(self.df, errorData,
@@ -157,7 +159,7 @@ class LSTM():
                                             # and the future prediction
             
                     # RNN
-                    rnnCell     = 'LSTMCell', # RNN cell type (LSTM/GRU/RNN)
+                    rnnCell     = self.TYPE, # RNN cell type (LSTM/GRU/RNN)
                     rnnNoCells  = 1,          # no of RNN cells
                     hidChNo     = 16,         # number of RNN cell hidden dimension
                     
@@ -254,6 +256,9 @@ class LSTM():
     def figureOptions(self, show_Figure):
         self.show_Figure = show_Figure
 
+    def add_df(self, df, name):
+        self.SIRdicts.append(df)
+
     def _optimizeTreshold(self, confRange):
         self.iterations = 5
         results_dict = {}
@@ -274,11 +279,11 @@ class LSTM():
         best = fmin(self.simulate,
             space=hp.uniform('Threshold', 50, 105),
             algo=tpe.suggest,
-            max_evals=6)
+            max_evals=5)
         return best
 
     
-    def plot(self, SIRdata=None):
+    def plot(self):
         showValData, showTrainData = self.bestValData, self.bestTrainData
         pred, predDate = self.bestPred, self.predDate
         date_until = self.TRAIN_UP_TO + datetime.timedelta(days=self.FUTURE_DAYS)
@@ -290,23 +295,59 @@ class LSTM():
         sns.lineplot(y = pred, x = predDate, ax = ax, linewidth=4.5)
         sns.lineplot(y = 'ConfirmedCases', x = 'Date', data = showTrainData, ax = ax, linewidth=4.5)
         
+        SIRdata, SIRDdata, SIRFdata = pd.DataFrame(self.SIRdicts[0]), pd.DataFrame(self.SIRdicts[1]), pd.DataFrame(self.SIRdicts[2])
+
         if SIRdata is not None:
             SIRdata = SIRdata[SIRdata["Date"] < date_until]
+            SIRFdata = SIRFdata[SIRFdata["Date"] < date_until]
+            SIRDdata = SIRDdata[SIRDdata["Date"] < date_until]
             sns.lineplot(y = 'New Confirmed', x ='Date', data = SIRdata, ax = ax, linewidth=4.5);
-            ax.legend(['Validation', 'Pred', 'Train', 'SIR'])
+            sns.lineplot(y = 'New Confirmed', x ='Date', data = SIRDdata, ax = ax, linewidth=4.5);
+            sns.lineplot(y = 'New Confirmed', x ='Date', data = SIRFdata, ax = ax, linewidth=4.5);
+            ax.legend(['Validation', 'LSTM', 'Train', 'SIR', 'SIRD', 'SIRF'])
         else:
             ax.legend(['Validation', 'Pred', 'Train'])
         ax.axvline(x=self.TRAIN_UP_TO, ymin = 0.0, ymax = 1.0, linestyle='--', lw = 1, color = '#808080')
         ax.grid(True)
         plt.show()
-    
-    def accuracy(self, SIRdata=None, overTime=True):
+
+    def accuracy_types(self):
+
         end_date = self.TRAIN_UP_TO + datetime.timedelta(days=self.FUTURE_DAYS)
         showValData, showTrainData = self.bestValData, self.bestTrainData
         showValData = showValData[showValData["Date"] < end_date]
+    
+        dfOverTime = pd.DataFrame()
+        total_rmse, total_mse = [], []
+        for i in range(1, len(showValData) - 1):
+            y, ypred = showValData["ConfirmedCases"].iloc[0:i],  self.bestPred[0:i]
+            mse = mean_squared_error(y, ypred, squared=False)
+            total_mse.append(mse)
+            rmse = mean_squared_error(y, ypred, squared=True)
+            total_rmse.append(rmse)
+
+            dfOverTime = pd.DataFrame()
+            dfOverTime["mse"] = total_mse
+            dfOverTime["rmse"] = total_rmse
+            
+        return dfOverTime
+
+    
+    def accuracy(self):
+        end_date = self.TRAIN_UP_TO + datetime.timedelta(days=self.FUTURE_DAYS)
+        showValData, showTrainData = self.bestValData, self.bestTrainData
+        showValData = showValData[showValData["Date"] < end_date]
+
+        SIRdata, SIRDdata, SIRFdata = pd.DataFrame(self.SIRdicts[0]), pd.DataFrame(self.SIRdicts[1]), pd.DataFrame(self.SIRdicts[2])
         SIRdata = SIRdata[SIRdata["Date"] >= self.TRAIN_UP_TO]
         SIRdata = SIRdata[SIRdata["Date"] <= end_date - datetime.timedelta(days=1)]
-       
+        SIRDdata = SIRDdata[SIRDdata["Date"] >= self.TRAIN_UP_TO]
+        SIRDdata = SIRDdata[SIRDdata["Date"] <= end_date - datetime.timedelta(days=1)]
+        SIRFdata = SIRFdata[SIRFdata["Date"] >= self.TRAIN_UP_TO]
+        SIRFdata = SIRFdata[SIRFdata["Date"] <= end_date - datetime.timedelta(days=1)]
+        SIRdata = SIRdata.rename(columns={"New Confirmed": "New Confirmed SIR"})
+        SIRDdata = SIRDdata.rename(columns={"New Confirmed": "New Confirmed SIRD"})
+        SIRFdata = SIRFdata.rename(columns={"New Confirmed": "New Confirmed SIRF"})
     
         squared = False
         if SIRdata is None:
@@ -315,31 +356,45 @@ class LSTM():
             mse = mean_squared_error(y, ypred, squared=squared)
             pd.DataFrame([[mse]], columns=["lstm"])
         else:
-            total_mse, total_mse_SIR = [], []
+            total_mse, total_mse_SIR, total_mse_SIRD, total_mse_SIRF = [], [], [], []
 
             predictions = pd.DataFrame()
             predictions["Date"] = SIRdata["Date"]
             predictions["Pred"] = self.bestPred
 
             merged = pd.merge(SIRdata, showValData, how="inner", on="Date")
+            merged = pd.merge(SIRDdata, merged, how="inner", on="Date")
+            merged = pd.merge(SIRFdata, merged, how="inner", on="Date")
             merged = pd.merge(merged, predictions, on="Date", how="inner")
+            
             y, ypred = merged["ConfirmedCases"], merged["Pred"]
             mse = mean_squared_error(y, ypred, squared=squared)
-            y, ypred = merged["ConfirmedCases"], merged[self.target]
+            y, ypred = merged["ConfirmedCases"], merged["New Confirmed SIR"]
             mse_SIR = mean_squared_error(y, ypred, squared=squared)
-            df = pd.DataFrame([[mse, mse_SIR]], columns=["lstm", "SIRF"])
+            y, ypred = merged["ConfirmedCases"], merged["New Confirmed SIRD"]
+            mse_SIRD = mean_squared_error(y, ypred, squared=squared)
+            y, ypred = merged["ConfirmedCases"], merged["New Confirmed SIRF"]
+            mse_SIRF = mean_squared_error(y, ypred, squared=squared)
+            df = pd.DataFrame([[mse, mse_SIR, mse_SIRD, mse_SIRF]], columns=["lstm", "SIR", "SIRD", "SIRF"])
 
             for i in range(1, len(showValData) - 1):
                 y, ypred = merged["ConfirmedCases"].iloc[0:i], merged["Pred"][0:i]
                 mse = mean_squared_error(y, ypred, squared=squared)
-                y, ypred = merged["ConfirmedCases"].iloc[0:i], merged[self.target].iloc[0:i]
-                mse_SIR = mean_squared_error(y, ypred, squared=squared)
                 total_mse.append(mse)
+                y, ypred = merged["ConfirmedCases"].iloc[0:i], merged["New Confirmed SIR"].iloc[0:i]
+                mse_SIR = mean_squared_error(y, ypred, squared=squared)
                 total_mse_SIR.append(mse_SIR)
+                y, ypred = merged["ConfirmedCases"].iloc[0:i], merged["New Confirmed SIRD"].iloc[0:i]
+                mse_SIRD = mean_squared_error(y, ypred, squared=squared)
+                total_mse_SIRD.append(mse_SIRD)
+                y, ypred = merged["ConfirmedCases"].iloc[0:i], merged["New Confirmed SIRF"].iloc[0:i]
+                mse_SIRF = mean_squared_error(y, ypred, squared=squared)
+                total_mse_SIRF.append(mse_SIRF)
             dfOverTime = pd.DataFrame()
             dfOverTime["lstm"] = total_mse
             dfOverTime["SIR"] = total_mse_SIR
+            dfOverTime["SIRD"] = total_mse_SIRD
+            dfOverTime["SIRF"] = total_mse_SIRF
             
-
         return df, dfOverTime
         

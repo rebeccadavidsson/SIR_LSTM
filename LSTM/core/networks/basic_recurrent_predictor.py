@@ -6,7 +6,7 @@ from .mlp import MLP
 
 # =============================================== BASIC RECCURENT PRED =================================================
 class BasicRecurrentPredictor(nn.Module):
-    def __init__(self, chNo, hidChNo = 128, future = 20, **kwargs):
+    def __init__(self, chNo, hidChNo = 128,future = 20, **kwargs):
         '''
         A  reccurent predictor composed from a Recurrent Cell and a MLP.
 
@@ -74,7 +74,7 @@ class BasicRecurrentPredictor(nn.Module):
         rnnModules = nn.ModuleList()
         for i in range(self.rnnNoCells):
             prevDepth = self.chNo if i == 0 else self.hidChNo
-            rnnModules.append(rnnCell(prevDepth, self.hidChNo))
+            rnnModules.append(rnnCell(prevDepth, hidden_size=self.hidChNo))
 
         return rnnModules
 
