@@ -57,7 +57,7 @@ DEVICE = 'cpu'
 class LSTM():
 
     def __init__(self, COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, 
-                ThreshDead, target, TYPE, show_Figure=True):
+                ThreshDead, target, TYPE, DELAY_START, show_Figure=True):
         self.COUNTRY      = COUNTRY
         self.TRAIN_UP_TO  = TRAIN_UP_TO
         self.ThreshDead   = ThreshDead
@@ -68,7 +68,7 @@ class LSTM():
         self.winSize      = 7
         self.obsSize      = 5
         self.futureSteps  = 15
-        self.iterations   = 5
+        self.iterations   = 6
         self.supPredSteps = self.winSize - self.obsSize
         self.uPredSteps   = self.futureSteps - self.supPredSteps
         self.allPredSteps = self.futureSteps + self.obsSize
@@ -77,6 +77,7 @@ class LSTM():
         self.bestPred     = None
         self.lowestError  = 10e10
         self.SIRdicts     = []
+        self.DELAY_START  = DELAY_START
         self.df           = self.init_data()
 
     def init_data(self):
@@ -124,18 +125,16 @@ class LSTM():
         
         return loss
 
-    def simulate(self, ThreshConf):
+    def simulate(self, input_data=None, second=False, ThreshConf=70, pred=None):
         """
         Run a LSTM model with given parameters and return the MAPE.
         """
-        print(f"Init LSTM model for {self.COUNTRY}, trained up to {self.TRAIN_UP_TO}, with a Confirmed Cases threshold of {round(ThreshConf)}  and window size of {self.winSize}")
-
         errorData = cc.get_nearest_sequence(self.df, self.COUNTRY,
                                         alignThreshConf=ThreshConf,
                                         alignThreshDead=self.ThreshDead,
-                                        errorFunc      = rmsle_error
+                                        errorFunc      =rmsle_error
                                         )
-
+    
         confData = dataUtils.get_target_data(self.df, errorData,
                                             errorThresh = .5,
                                             country     = self.COUNTRY,
@@ -144,6 +143,23 @@ class LSTM():
                                             errorThresh = .5, 
                                             country     = self.COUNTRY, 
                                             target      = 'fatalities')
+
+        if input_data is not None:
+            temp_df = confData
+            predictions = input_data["pred"]
+            date = input_data["TRAIN_UP_TO"] - datetime.timedelta(days=1) # - datetime.timedelta(days=input_data["FUTURE_DAYS"])
+            if second:
+                date = date - datetime.timedelta(days=second)
+                print(date, len(predictions))
+            # display(confData[confData["Date"] == self.TRAIN_UP_TO])
+            for pred in predictions:
+                temp_df.loc[temp_df["Date"] == date, "ConfirmedCases"] = pred
+                date += datetime.timedelta(days=1)
+            confData = temp_df
+            # self.TRAIN_UP_TO = date - datetime.timedelta(days = int(input_data["FUTURE_DAYS"] / 1))
+            self.TRAIN_UP_TO = date
+        print(f"Init LSTM model for {self.COUNTRY}, trained up to {self.TRAIN_UP_TO}, with a Confirmed Cases threshold of {round(ThreshConf)}  and window size of {self.winSize}")
+
 
         confScaler = dataUtils.get_scaler(confData, 'confirmed')
         deadScaler = dataUtils.get_scaler(deadData, 'fatalities')
@@ -175,7 +191,7 @@ class LSTM():
         w.init_weights(self.confModel, 'normal_', {})
 
         self.confTrainData = dataUtils.get_train_data(confData, 'confirmed', 
-                                        step       = 1,
+                                        step       = 5,
                                         winSize    = self.winSize, 
                                         trainLimit = self.TRAIN_UP_TO, 
                                         scaler     = confScaler,
@@ -187,12 +203,12 @@ class LSTM():
 
         self.confGLoss   = GradientSmoothLoss(confGradMax, self.uPredSteps)
         self.confOptim = optim.LBFGS(self.confModel.parameters(), 
-                                lr             = 0.05, 
+                                lr             = 0.1, 
                                 max_iter       = 75, 
                                 tolerance_grad = 1e-7, 
                                 history_size   = 75
                             )
-        self.confModel.to(DEVICE);
+        self.confModel.to(DEVICE)
         self.confTrainData = self.confTrainData.to(DEVICE);
 
         status = "ok"
@@ -202,7 +218,7 @@ class LSTM():
             if loss > 10:
                 print(loss)
                 status = "fail"
-                self.simulate(ThreshConf)
+                self.simulate(input_data=input_data, second=second)
                 break
             # update tqdm to show loss and lr
             pBar.set_postfix({'Loss ' : loss.item(), 
@@ -250,9 +266,38 @@ class LSTM():
         if self.show_Figure:
             self.plot()
 
+        if input_data is not None:
+            pred = list(input_data["pred"]) + list(self.bestPred)
+        else:
+            pred = self.bestPred
         print("RMSLE : %2.5f"% error, ' (not normalized)')     
-        return {"loss": error, "status": status}
-    
+        return {"error": error, 'valData': self.bestValData, 
+                'trainData': self.bestTrainData, 'pred': pred, 
+                "TRAIN_UP_TO": self.TRAIN_UP_TO, "FUTURE_DAYS": self.FUTURE_DAYS}
+
+    def rollingUpdate(self):
+        """
+        For the rolling update mechanism, if update is true,
+        predictions (self.pred) are added to confData at the right location
+        self.TRAIN_UP_TO then also gets shifted.
+        """
+        ITERATIONS = 2
+        # First run
+        for i in range(ITERATIONS):
+            results = self.simulate()
+
+        self.clear_history()
+        for i in range(ITERATIONS, input=results):
+            results = self.simulate()
+        return results
+
+
+
+    def clear_history(self):
+        self.bestValData  = None
+        self.bestTrainData= None
+        self.bestPred     = None
+
     def figureOptions(self, show_Figure):
         self.show_Figure = show_Figure
 
@@ -295,9 +340,8 @@ class LSTM():
         sns.lineplot(y = pred, x = predDate, ax = ax, linewidth=4.5)
         sns.lineplot(y = 'ConfirmedCases', x = 'Date', data = showTrainData, ax = ax, linewidth=4.5)
         
-        SIRdata, SIRDdata, SIRFdata = pd.DataFrame(self.SIRdicts[0]), pd.DataFrame(self.SIRdicts[1]), pd.DataFrame(self.SIRdicts[2])
-
-        if SIRdata is not None:
+        if len(self.SIRdicts) > 0:
+            SIRdata, SIRDdata, SIRFdata = pd.DataFrame(self.SIRdicts[0]), pd.DataFrame(self.SIRdicts[1]), pd.DataFrame(self.SIRdicts[2])
             SIRdata = SIRdata[SIRdata["Date"] < date_until]
             SIRFdata = SIRFdata[SIRFdata["Date"] < date_until]
             SIRDdata = SIRDdata[SIRDdata["Date"] < date_until]
