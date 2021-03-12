@@ -26,20 +26,25 @@ def preprocess_data(df):
 def get_target_data(allData, errorData, errorThresh, country, target):
     errName = 'deathError' if target == 'fatalities' else 'confirmedError'
     colName = 'Fatalities' if target == 'fatalities' else 'ConfirmedCases'
-
     errorDf = errorData.sort_values(by=errName)
-
     topConfCountries = errorDf.sort_values(by=errName)
     topConfCountries = topConfCountries[topConfCountries[errName] < errorThresh]
     topConfCountries = topConfCountries['Province_State'].values.tolist()
     topConfCountries.append(country)
 
     targetCols = ['Date', 'Province_State', colName]
-    data = pd.DataFrame(columns=targetCols)
 
+    data = pd.DataFrame(columns=targetCols)
     for country in topConfCountries:
-        countryData = allData[allData['Province_State'] == country][targetCols]
-        countryData = countryData[countryData[colName] > 0]
+        if country in ["China", "Australia"]:
+            countryData = allData[allData['Country_Region'] == country].groupby("Date").mean().reset_index()
+            countryData["Province_State"] = country
+            countryData = countryData[targetCols]
+            countryData = countryData[countryData[colName] > 0]
+        else:
+            countryData =  allData[allData['Province_State'] == country][targetCols]
+            countryData = countryData[countryData[colName] > 0]
+
         data = pd.concat([data, countryData])
 
     return data
@@ -58,7 +63,6 @@ def get_scaler(allData, target):
     scaler    = StandardScaler()
     dataScale = allData[colName].values
     dataScale = dataScale.reshape(-1, 1)
-
     scaler.fit(dataScale)
 
     return scaler
@@ -125,6 +129,7 @@ def get_val_data(allData, target, country, startFrom, obsSize, scaler = None):
 
     dPred  = data[:obsSize].reshape(-1, 1)
     dLabel = data[obsSize:].reshape(-1, 1)
+    print(dPred)
 
     if scaler is not None:
         dPred  = scaler.transform(dPred)

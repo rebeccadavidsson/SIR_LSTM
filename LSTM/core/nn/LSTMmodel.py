@@ -60,7 +60,7 @@ class LSTM():
                 ThreshDead, target, TYPE, DELAY_START, show_Figure=False):
         self.COUNTRY      = COUNTRY
         self.TRAIN_UP_TO  = TRAIN_UP_TO
-        self.ThreshDead   = ThreshDead
+        self.ThreshDead   = 0
         self.target       = target
         self.show_Figure  = show_Figure
         self.FUTURE_DAYS  = FUTURE_DAYS
@@ -130,19 +130,23 @@ class LSTM():
         Run a LSTM model with given parameters and return the MAPE.
         """
         errorData = cc.get_nearest_sequence(self.df, self.COUNTRY,
-                                        alignThreshConf=ThreshConf,
+                                        alignThreshConf=0,
                                         alignThreshDead=self.ThreshDead,
                                         errorFunc      =rmsle_error
                                         )
-    
+
+        if self.COUNTRY == "China":
+            errorThresh = 1.8
+        else:
+            errorThresh = 1.5
         confData = dataUtils.get_target_data(self.df, errorData,
-                                            errorThresh = .5,
+                                            errorThresh = errorThresh,
                                             country     = self.COUNTRY,
                                             target      = 'confirmed')
-        deadData = dataUtils.get_target_data(self.df, errorData,
-                                            errorThresh = .5, 
-                                            country     = self.COUNTRY, 
-                                            target      = 'fatalities')
+        # deadData = dataUtils.get_target_data(self.df, errorData,
+        #                                     errorThresh = .5, 
+        #                                     country     = self.COUNTRY, 
+        #                                     target      = 'fatalities')
 
         if input_data is not None:
             confData = input_data["confData"]
@@ -161,9 +165,8 @@ class LSTM():
             self.TRAIN_UP_TO = date
             
         # print(f"Init LSTM model for {self.COUNTRY}, trained up to {self.TRAIN_UP_TO}, with a Confirmed Cases threshold of {round(ThreshConf)}  and window size of {self.winSize}")
-
         confScaler = dataUtils.get_scaler(confData, 'confirmed')
-        deadScaler = dataUtils.get_scaler(deadData, 'fatalities')
+        # deadScaler = dataUtils.get_scaler(deadData, 'fatalities')
 
         w = WeightInitializer()
 
@@ -228,6 +231,7 @@ class LSTM():
             
             if torch.isnan(loss):
                 raise ValueError('Loss is NaN')
+        
         confValData, confValLabel = dataUtils.get_val_data(confData, 'confirmed', 
                                                         self.COUNTRY, 
                                                         self.TRAIN_UP_TO, 
