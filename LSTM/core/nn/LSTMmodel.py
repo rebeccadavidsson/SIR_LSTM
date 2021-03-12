@@ -57,7 +57,7 @@ DEVICE = 'cpu'
 class LSTM():
 
     def __init__(self, COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, 
-                ThreshDead, target, TYPE, DELAY_START, show_Figure=True):
+                ThreshDead, target, TYPE, DELAY_START, show_Figure=False):
         self.COUNTRY      = COUNTRY
         self.TRAIN_UP_TO  = TRAIN_UP_TO
         self.ThreshDead   = ThreshDead
@@ -68,7 +68,7 @@ class LSTM():
         self.winSize      = 7
         self.obsSize      = 5
         self.futureSteps  = 15
-        self.iterations   = 6
+        self.iterations   = 2
         self.supPredSteps = self.winSize - self.obsSize
         self.uPredSteps   = self.futureSteps - self.supPredSteps
         self.allPredSteps = self.futureSteps + self.obsSize
@@ -145,21 +145,22 @@ class LSTM():
                                             target      = 'fatalities')
 
         if input_data is not None:
+            confData = input_data["confData"]
             temp_df = confData
             predictions = input_data["pred"]
-            date = input_data["TRAIN_UP_TO"] - datetime.timedelta(days=1) # - datetime.timedelta(days=input_data["FUTURE_DAYS"])
-            if second:
-                date = date - datetime.timedelta(days=second)
-                print(date, len(predictions))
-            # display(confData[confData["Date"] == self.TRAIN_UP_TO])
+            date = input_data["TRAIN_UP_TO"] 
+            # if second:
+            #     date = date - datetime.timedelta(days=second)
+            #     print(date, len(predictions))
+            # # display(confData[confData["Date"] == self.TRAIN_UP_TO])
             for pred in predictions:
                 temp_df.loc[temp_df["Date"] == date, "ConfirmedCases"] = pred
                 date += datetime.timedelta(days=1)
             confData = temp_df
             # self.TRAIN_UP_TO = date - datetime.timedelta(days = int(input_data["FUTURE_DAYS"] / 1))
             self.TRAIN_UP_TO = date
-        print(f"Init LSTM model for {self.COUNTRY}, trained up to {self.TRAIN_UP_TO}, with a Confirmed Cases threshold of {round(ThreshConf)}  and window size of {self.winSize}")
-
+            
+        # print(f"Init LSTM model for {self.COUNTRY}, trained up to {self.TRAIN_UP_TO}, with a Confirmed Cases threshold of {round(ThreshConf)}  and window size of {self.winSize}")
 
         confScaler = dataUtils.get_scaler(confData, 'confirmed')
         deadScaler = dataUtils.get_scaler(deadData, 'fatalities')
@@ -198,6 +199,7 @@ class LSTM():
                                         shuffle    = True)
 
         self.confLoss  = nn.SmoothL1Loss()
+
         gradsTrain  = self.confTrainData[:, 1:] - self.confTrainData[:, :-1] 
         confGradMax = gradsTrain.max()
 
@@ -212,17 +214,17 @@ class LSTM():
         self.confTrainData = self.confTrainData.to(DEVICE);
 
         status = "ok"
-        pBar = tqdm(range(self.iterations))
-        for i in pBar:
+        # pBar = tqdm(range(self.iterations))
+        for i in range(self.iterations):
             loss = self.confOptim.step(self.conf_closure)
             if loss > 10:
-                print(loss)
                 status = "fail"
-                self.simulate(input_data=input_data, second=second)
+                # self.simulate(input_data=input_data)
                 break
+
             # update tqdm to show loss and lr
-            pBar.set_postfix({'Loss ' : loss.item(), 
-                            'Lr'    : self.confOptim.param_groups[0]['lr']})
+            # pBar.set_postfix({'Loss ' : loss.item(), 
+            #                 'Lr'    : self.confOptim.param_groups[0]['lr']})
             
             if torch.isnan(loss):
                 raise ValueError('Loss is NaN')
@@ -256,6 +258,9 @@ class LSTM():
         if math.isnan(error):
             status = "fail"
             error = 10e10
+            self.simulate(input_data=input_data)
+        elif error > 1.5:
+            self.simulate(input_data=input_data)
 
         if error <= self.lowestError or self.bestValData is None:
             self.bestValData   = self.showValData
@@ -266,13 +271,13 @@ class LSTM():
         if self.show_Figure:
             self.plot()
 
-        if input_data is not None:
-            pred = list(input_data["pred"]) + list(self.bestPred)
-        else:
-            pred = self.bestPred
-        print("RMSLE : %2.5f"% error, ' (not normalized)')     
-        return {"error": error, 'valData': self.bestValData, 
-                'trainData': self.bestTrainData, 'pred': pred, 
+        # if input_data is not None:
+        #     pred = list(input_data["pred"]) + list(self.bestPred)
+        # else:
+
+        # print("RMSLE : %2.5f"% error, ' (not normalized)')     
+        return {"error": error, 'valData': self.bestValData, 'confData': confData,
+                'trainData': self.bestTrainData, 'pred': self.bestPred, 
                 "TRAIN_UP_TO": self.TRAIN_UP_TO, "FUTURE_DAYS": self.FUTURE_DAYS}
 
     def rollingUpdate(self):

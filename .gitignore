@@ -15,3 +15,17 @@ ipynb_checkpoints/
 /figures/*
 ./figures/*
 figures/*
+
+data/*
+data/
+./data*
+./data/
+SIR/data*
+SIR/data
+SIR/data/*
+SIR/data
+
+UQ/*
+UQ
+./UQ
+./UQ/
