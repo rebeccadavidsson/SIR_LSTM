@@ -25,10 +25,7 @@ SIR/data
 SIR/data/*
 SIR/data
 
-UQ/*
-UQ
-./UQ
-./UQ/
+UQ/UQ_toolbox
 
 
 LSTM/*.p
