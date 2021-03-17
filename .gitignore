@@ -29,3 +29,11 @@ UQ/*
 UQ
 ./UQ
 ./UQ/
+
+
+LSTM/*.p
+LSTM/.p*
+
+SIR/Sensitivity Analysis.ipynb
+
+.ipynb_checkpoints

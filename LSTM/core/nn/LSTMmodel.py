@@ -54,10 +54,17 @@ torch.backends.cudnn.benchmark = False
 DEVICE = 'cpu'
 
 
+PARAMS_DICT = {
+    "window":  7,
+    "steps": 5,
+    "clustering threshold": 70
+}
+
 class LSTM():
 
     def __init__(self, COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, 
-                ThreshDead, target, TYPE, DELAY_START, show_Figure=False):
+                ThreshDead, target, TYPE, DELAY_START, PARAMS=PARAMS_DICT, 
+                show_Figure=False):
         self.COUNTRY      = COUNTRY
         self.TRAIN_UP_TO  = TRAIN_UP_TO
         self.ThreshDead   = 0
@@ -65,8 +72,8 @@ class LSTM():
         self.show_Figure  = show_Figure
         self.FUTURE_DAYS  = FUTURE_DAYS
         self.TYPE         = TYPE
-        self.winSize      = 7
-        self.obsSize      = 5
+        self.winSize      = PARAMS["window"]
+        self.obsSize      = PARAMS["steps"]
         self.futureSteps  = 15
         self.iterations   = 2
         self.supPredSteps = self.winSize - self.obsSize

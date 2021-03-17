@@ -129,7 +129,6 @@ def get_val_data(allData, target, country, startFrom, obsSize, scaler = None):
 
     dPred  = data[:obsSize].reshape(-1, 1)
     dLabel = data[obsSize:].reshape(-1, 1)
-    print(dPred)
 
     if scaler is not None:
         dPred  = scaler.transform(dPred)
