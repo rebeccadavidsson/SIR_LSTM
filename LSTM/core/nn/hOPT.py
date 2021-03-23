@@ -128,7 +128,7 @@ class HOPT():
 
     def simulate(self, ThreshConf=70):
         """
-        Run a LSTM model with given parameters and return the MAPE.
+        Run a LSTM model with given parameters and return the error.
         """
         self.uPredSteps   = self.futureSteps - self.supPredSteps
         self.allPredSteps = self.futureSteps + self.obsSize

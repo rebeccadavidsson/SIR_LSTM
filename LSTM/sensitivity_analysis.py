@@ -5,30 +5,33 @@ import math
 import pickle
 import datetime
 from numpy import array
-import matplotlib.pylab as plt
 import pandas as pd
 import covsirphy as cs
 import requests, io, json, urllib
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 from itertools import cycle
 import os.path
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import plotly.express as px
 import math
-from sklearn.metrics import mean_squared_error
-from itertools import cycle
 import seaborn as sns
-import random
 sns.set()
 
 
 def SA(COUNTRY, PARAMS, NPI_df, jhu_data, population_data):
+
+    ThreshConf   = 70
+    ThreshDead   = 20
+    TARGET       = "New Confirmed"
+    TYPE         = "LSTMCell"
+    FUTURE_DAYS  = 5
+    DELAY_START  = 16
+    # TRAIN_UP_TO  = pd.to_datetime("2020-12-01")
+
+    # lstm = LSTM(COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, ThreshDead, TARGET, TYPE, DELAY_START, PARAMS)
+    # lstm.simulate(ThreshConf=70)
+
+    errors = pd.DataFrame(columns = ["RMSE", "MAE", "MAPE"])
     days_delay = PARAMS["days_delay"]
     TARGET_NPI = PARAMS["TARGET"]
-    input_rate = PARAMS["input_rate"]
 
     NPI_df = NPI_df[NPI_df["Country"] == COUNTRY]
 
@@ -38,6 +41,7 @@ def SA(COUNTRY, PARAMS, NPI_df, jhu_data, population_data):
 
     NPI = TARGET_NPI
     NPI_dates = {}
+
     lockdown_indexes = NPI_df[NPI_df[NPI] >= 75].index
     lockdown_dates = NPI_df[NPI_df[NPI] >= 75]["Date"]
     periods = get_periods(lockdown_indexes)
@@ -70,13 +74,9 @@ def SA(COUNTRY, PARAMS, NPI_df, jhu_data, population_data):
     lockdown_dates_adjusted = pd.Series(lockdown_dates_adjusted) 
 
     # Save variable DELAY_START, which is equal to the start of a lockdown period
-    # in this case, we will hardcode the script to the second lockdown date
-    # if len(periods) > 2:
-    print(periods)
+    if len(periods) < 1:
+        return False
     DELAY_START = NPI_df.iloc[periods[len(periods) - 1][0]].Date
-
-    # else:
-    #     DELAY_START = NPI_df.iloc[periods[0][0]].Date
 
     df = jhu_data
     df = df[(df["Country"] == COUNTRY) & (df["Province"] == "-")]
@@ -84,13 +84,15 @@ def SA(COUNTRY, PARAMS, NPI_df, jhu_data, population_data):
 
     if COUNTRY == "United Kingdom":
         df_params = pd.read_pickle("./data/df_United_Kingdom")
+    if COUNTRY in ["Australia", "China", "Japan", "United States"]:
+        df_params = pd.read_pickle("./data/df_Chi_Aus_Jap_Us")
     elif COUNTRY == "Sweden":
         df_params = pd.read_pickle("../figures/pickles/df_Sweden")
     elif COUNTRY == "United States":
         df_params = pd.read_pickle("../figures/pickles/df_United_States")
     else:
         df_params = pd.read_pickle("../figures/pickles/df_9_countries")
-    df_params["Country"].unique()
+
     df_params = df_params[df_params["Country"] == COUNTRY]
 
     TRAIN_UP_TO  = DELAY_START 
@@ -108,10 +110,6 @@ def SA(COUNTRY, PARAMS, NPI_df, jhu_data, population_data):
     if selection["Confirmed"].values[0] == 0:
         target_column = "Infected"
 
-    country_df = jhu_data
-    country_df = country_df[(country_df["Country"] == COUNTRY) & (country_df["Province"] == "-") ]
-    selection = country_df[country_df["Date"] == DELAY_START + datetime.timedelta(days_delay + 2)]
-
     def calc_param(df, lockdown_dates):
         total_params = ["theta", "kappa", "rho", "sigma"]
         calc_params_df = {}
@@ -120,13 +118,13 @@ def SA(COUNTRY, PARAMS, NPI_df, jhu_data, population_data):
             for date in df["Date"].values:
                 if date in lockdown_dates.values:
                     values.append(np.mean(df[df['Date'] == date][param]))
-            keep_values = random.sample(values, int((1 - input_rate) * len(values)))
-            calc_params_df[param] = np.mean(keep_values)
+            calc_params_df[param] = np.mean(values)
         return calc_params_df
 
     # params = calc_param(df_params, lockdown_dates_adjusted)
     params_total = {}
     sir_params_total = {}
+
     for p in NPI_dates:
         res = calc_param(df_params, pd.Series(NPI_dates[p]))
         if not math.isnan(res["kappa"]):
@@ -144,34 +142,33 @@ def SA(COUNTRY, PARAMS, NPI_df, jhu_data, population_data):
     TARGET       = "New Confirmed"
     TYPE         = "LSTMCell"
     FUTURE_DAYS  = 5
-    RUNS         = 3
-    ERROR_THRESH = 1
+    RUNS         = 1
+    ERROR_THRESH = 1.7
     WITH_BIAS    = True
-    errors       = []
+
     BIAS = sir_params_total[TARGET_NPI]
 
-    fname = f"res_{TARGET_NPI}_{WITH_BIAS}_{COUNTRY}_{input_rate}.p"
-    print(fname)
+    fname = f"results/res_{TARGET_NPI}_{WITH_BIAS}_{COUNTRY}.p"
     results_df = pd.DataFrame(columns=["Date"])
 
     # Check if dataframe already exists to build up on
     if os.path.isfile(fname):
-        results_df = pickle.load(open(fname, "rb"))
+        results_df = pickle.load(open( fname, "rb" ))
         j = len(results_df.columns)
         RUNS = j + RUNS
     else:
         j = 0
-    print(DELAY_START)
+
     while j < RUNS:
         print("RUN", j)
         FUTURE_DAYS = 5
-        lstm = LSTM(COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, ThreshDead, TARGET, TYPE, DELAY_START, PARAMS)
+        lstm = LSTM(COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, ThreshDead, TARGET, TYPE, DELAY_START, PARAMS, N)
         results1 = lstm.simulate(ThreshConf=70)
         bias_results = add_bias(results1, BIAS, DELAY_START, days_delay, SIR_results)
 
         for i in range(2):
             FUTURE_DAYS += 6
-            lstm = LSTM(COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, ThreshDead, TARGET, TYPE, DELAY_START, PARAMS)
+            lstm = LSTM(COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, ThreshDead, TARGET, TYPE, DELAY_START, PARAMS, N)
             results2 = lstm.simulate(ThreshConf=70, input_data=bias_results)
             bias_results = add_bias(results2, BIAS,  DELAY_START, days_delay, SIR_results, isBias=WITH_BIAS)
 
@@ -191,23 +188,22 @@ def SA(COUNTRY, PARAMS, NPI_df, jhu_data, population_data):
             results_df["valCases"] = valCases["ConfirmedCases"]
 
         error = results2["error"]
-        print(error)
+    
+
         # Don't save run if there were errors in prediction
         if error > ERROR_THRESH:
+            # print(error)
             RUNS += 1
         else:
-            errors.append(error)
             if j == 0:
                 results_df["ConfirmedCases"] = new_col["ConfirmedCases"]
             else:
                 new_col = new_col.rename(columns={"ConfirmedCases": "Cases" + str(j)})
                 results_df = pd.concat([results_df, new_col["Cases" + str(j)]], axis=1)
+            err = results2["errors"]
+            errors = errors.append(pd.Series(results2["errors"], index=errors.columns ), ignore_index=True)
         j += 1
 
-        if WITH_BIAS:
-            results_df.to_pickle(fname)
-        else:
-            results_df.to_pickle(fname)
     return errors
 
 
@@ -217,14 +213,7 @@ def get_periods(nums):
     edges = iter(nums[:1] + sum(gaps, []) + nums[-1:])
     return list(zip(edges, edges))
     
-
-# def plot_param(df, periods, TARGET):
-#     fig = px.line(df, x="Date", y=TARGET, title='Lockdown periods in ' + COUNTRY)
-#     for dates in periods:
-#         fig.add_vrect(x0=NPI_df.iloc[dates[0]]["Date"], x1=NPI_df.iloc[dates[1]]["Date"], line_width=0, fillcolor="red", opacity=0.2)
-#     fig.show()
-
-def add_bias(results, BIAS, DELAY_START, days_delay, SIR_results, isBias=True):
+def add_bias(results, BIAS, DELAY_START, days_delay, SIR_results,  isBias=True):
     data = results.copy()
     preds = []
     SIR_data = []

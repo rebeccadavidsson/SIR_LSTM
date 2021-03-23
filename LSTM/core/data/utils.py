@@ -36,7 +36,7 @@ def get_target_data(allData, errorData, errorThresh, country, target):
 
     data = pd.DataFrame(columns=targetCols)
     for country in topConfCountries:
-        if country in ["China", "Australia"]:
+        if country in ["China"]:
             countryData = allData[allData['Country_Region'] == country].groupby("Date").mean().reset_index()
             countryData["Province_State"] = country
             countryData = countryData[targetCols]
@@ -88,14 +88,12 @@ def get_train_data(allData, target, trainLimit, winSize, step, scaler = None, sh
     batches = []
     for c in data['Province_State'].unique():
         cVals = data[data['Province_State'] == c][colName].values
-
         for i in range(0, cVals.shape[0] - winSize, step):
             batch = cVals[i:i + winSize].reshape(-1, 1)
             # scale
             if scaler is not None:
                 batch = scaler.transform(batch)
             batches.append(batch)
-
 
     batches = torch.Tensor(batches).float()
 

@@ -40,6 +40,10 @@ from core.data      import utils             as dataUtils
 from core.nn        import WeightInitializer
 from core.nn.loss   import l1_norm_error
 from core.nn.loss   import rmsle_error
+from core.nn.loss   import mae_error
+from core.nn.loss   import rmsle_
+from core.nn.loss   import r2
+from core.nn.loss   import mape_error
 from core.nn.loss   import GradientSmoothLoss
 
 from core.networks  import BasicRecurrentPredictor
@@ -63,9 +67,13 @@ PARAMS_DICT = {
 class LSTM():
 
     def __init__(self, COUNTRY, TRAIN_UP_TO, FUTURE_DAYS, 
-                ThreshDead, target, TYPE, DELAY_START, PARAMS=PARAMS_DICT, 
+                ThreshDead=20, target="New Confirmed", 
+                TYPE="LSTMCell", DELAY_START=14, PARAMS=PARAMS_DICT, N=10e7,
                 show_Figure=False):
-        self.COUNTRY      = COUNTRY
+        if COUNTRY == "United States":
+            self.COUNTRY = "US"
+        else:
+            self.COUNTRY = COUNTRY
         self.TRAIN_UP_TO  = TRAIN_UP_TO
         self.ThreshDead   = 0
         self.target       = target
@@ -75,7 +83,7 @@ class LSTM():
         self.winSize      = PARAMS["window"]
         self.obsSize      = PARAMS["steps"]
         self.futureSteps  = 15
-        self.iterations   = 2
+        self.iterations   = 3
         self.supPredSteps = self.winSize - self.obsSize
         self.uPredSteps   = self.futureSteps - self.supPredSteps
         self.allPredSteps = self.futureSteps + self.obsSize
@@ -85,6 +93,7 @@ class LSTM():
         self.lowestError  = 10e10
         self.SIRdicts     = []
         self.DELAY_START  = DELAY_START
+        self.N            = N
         self.df           = self.init_data()
 
     def init_data(self):
@@ -136,42 +145,38 @@ class LSTM():
         """
         Run a LSTM model with given parameters and return the MAPE.
         """
+        self.df = self.df.replace("Western Australia", "Australia")
+
         errorData = cc.get_nearest_sequence(self.df, self.COUNTRY,
                                         alignThreshConf=0,
                                         alignThreshDead=self.ThreshDead,
                                         errorFunc      =rmsle_error
                                         )
 
+
         if self.COUNTRY == "China":
             errorThresh = 1.8
+        elif self.COUNTRY == "Australia":
+            errorThresh = 4
         else:
             errorThresh = 1.5
+        
         confData = dataUtils.get_target_data(self.df, errorData,
                                             errorThresh = errorThresh,
                                             country     = self.COUNTRY,
                                             target      = 'confirmed')
-        # deadData = dataUtils.get_target_data(self.df, errorData,
-        #                                     errorThresh = .5, 
-        #                                     country     = self.COUNTRY, 
-        #                                     target      = 'fatalities')
 
         if input_data is not None:
             confData = input_data["confData"]
             temp_df = confData
             predictions = input_data["pred"]
             date = input_data["TRAIN_UP_TO"] 
-            # if second:
-            #     date = date - datetime.timedelta(days=second)
-            #     print(date, len(predictions))
-            # # display(confData[confData["Date"] == self.TRAIN_UP_TO])
             for pred in predictions:
                 temp_df.loc[temp_df["Date"] == date, "ConfirmedCases"] = pred
                 date += datetime.timedelta(days=1)
             confData = temp_df
-            # self.TRAIN_UP_TO = date - datetime.timedelta(days = int(input_data["FUTURE_DAYS"] / 1))
             self.TRAIN_UP_TO = date
             
-        # print(f"Init LSTM model for {self.COUNTRY}, trained up to {self.TRAIN_UP_TO}, with a Confirmed Cases threshold of {round(ThreshConf)}  and window size of {self.winSize}")
         confScaler = dataUtils.get_scaler(confData, 'confirmed')
         # deadScaler = dataUtils.get_scaler(deadData, 'fatalities')
 
@@ -199,7 +204,7 @@ class LSTM():
                                             # in the sequence will be activated too
                     ).build()
 
-        w.init_weights(self.confModel, 'normal_', {})
+        w.init_weights(self.confModel, 'normal_', {})   
 
         self.confTrainData = dataUtils.get_train_data(confData, 'confirmed', 
                                         step       = 5,
@@ -222,6 +227,8 @@ class LSTM():
                             )
         self.confModel.to(DEVICE)
         self.confTrainData = self.confTrainData.to(DEVICE);
+
+        print(self.TRAIN_UP_TO)
 
         status = "ok"
         # pBar = tqdm(range(self.iterations))
@@ -253,7 +260,10 @@ class LSTM():
         self.pred   = self.confModel(confValData, future = self.FUTURE_DAYS).cpu().detach().numpy()
         self.pred   = confScaler.inverse_transform(self.pred[0])
 
-        error  = rmsle_error(self.pred[:confValLabel.shape[0]], confValLabel.numpy())        
+        error  = rmsle_error(self.pred[:confValLabel.shape[0]], confValLabel.numpy())       
+        errors =  [rmsle_(self.pred[:confValLabel.shape[0]], confValLabel.numpy(), self.N), 
+                    mae_error(self.pred[:confValLabel.shape[0]], confValLabel.numpy(), self.N),
+                    mape_error(self.pred[:confValLabel.shape[0]], confValLabel.numpy())]
 
         # prediction
         self.predDate = pd.date_range(start = self.TRAIN_UP_TO, periods=self.pred.shape[0])              
@@ -266,11 +276,12 @@ class LSTM():
         self.showValData = self.showValData[self.showValData['Date'] >= self.TRAIN_UP_TO]
 
         error = error.item()
+        print(error)
         if math.isnan(error):
             status = "fail"
             error = 10e10
             self.simulate(input_data=input_data)
-        elif error > 1.5:
+        elif error > 1.7:
             self.simulate(input_data=input_data)
 
         if error <= self.lowestError or self.bestValData is None:
@@ -282,12 +293,7 @@ class LSTM():
         if self.show_Figure:
             self.plot()
 
-        # if input_data is not None:
-        #     pred = list(input_data["pred"]) + list(self.bestPred)
-        # else:
-
-        # print("RMSLE : %2.5f"% error, ' (not normalized)')     
-        return {"error": error, 'valData': self.bestValData, 'confData': confData,
+        return {"error": error, "errors": errors, 'valData': self.bestValData, 'confData': confData,
                 'trainData': self.bestTrainData, 'pred': self.bestPred, 
                 "TRAIN_UP_TO": self.TRAIN_UP_TO, "FUTURE_DAYS": self.FUTURE_DAYS}
 

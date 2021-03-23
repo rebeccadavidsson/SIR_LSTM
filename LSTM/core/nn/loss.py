@@ -2,24 +2,60 @@ import numpy as np
 
 import torch
 from torch import nn
+from sklearn.metrics import r2_score
+import scipy
+import matplotlib.pylab as plt
+
+def mape_error(y_pred, y_true):
+    # y_pred=y_pred[:len(y_true)]
+    y_true, y_pred = np.array(y_true), np.array(y_pred)
+    return np.mean(np.abs((y_true - y_pred) / y_true)) 
 
 # =============================================== L1 NORM =====================================================
 def l1_norm_error(source, candidate):
-
+    # candidate = candidate[:len(source)]
     error = np.abs(source - candidate)
-    source[source == 0] = 1e-30  # add for numerical stability
-    error = error / source       # compute the percentage
+    source[source == 0] = 1e-30  
+    error = error / source       
     error = error.mean()
     return error
 
+def mae_error(source, candidate, N):
+    # candidate = candidate[:len(source)]
+    # candidate =  candidate / N
+    # source = source / N
+    error = np.abs(source - candidate)
+    source[source == 0] = 1e-30
+    error = error / source
+    error = error.mean()
+    return (error / N) * 1000000
+
+
 # =============================================== RMSLE  =====================================================
 def rmsle_error(source, candidate):
+    # candidate = candidate[:len(source)]
     candidate += 1e-30
     error = np.log10((source + 1) / (candidate + 1))
     error = error * error
     error = error.mean()
     error = np.sqrt(error)
     return error
+
+def rmsle_(source, candidate, N=1):
+    # candidate = candidate[:len(source)]
+    candidate += 1e-30
+    error = (source) - (candidate)
+    error = error * error
+    error = error.mean()
+    error = np.sqrt(error)
+    return (error / N)
+
+# =============================================== R2  =====================================================
+
+def r2(pred, y_true):
+    return r2_score(pred, y_true[:len(pred)])
+
+
 
 # =============================================== GRADIENT SMOOTH =====================================================
 class GradientSmoothLoss(nn.Module):
