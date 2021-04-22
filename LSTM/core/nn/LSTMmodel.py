@@ -228,7 +228,6 @@ class LSTM():
         self.confModel.to(DEVICE)
         self.confTrainData = self.confTrainData.to(DEVICE);
 
-        print(self.TRAIN_UP_TO)
 
         status = "ok"
         # pBar = tqdm(range(self.iterations))

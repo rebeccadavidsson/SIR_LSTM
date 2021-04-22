@@ -34,3 +34,10 @@ LSTM/.p*
 SIR/Sensitivity Analysis.ipynb
 
 .ipynb_checkpoints
+
+covsirphy
+covsirphy/
+/covsirphy
+covsirphy/*
+./covsirphy
+./covsirphy/*

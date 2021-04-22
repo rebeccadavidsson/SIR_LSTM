@@ -200,7 +200,6 @@ def SA(COUNTRY, PARAMS, NPI_df, jhu_data, population_data):
             else:
                 new_col = new_col.rename(columns={"ConfirmedCases": "Cases" + str(j)})
                 results_df = pd.concat([results_df, new_col["Cases" + str(j)]], axis=1)
-            err = results2["errors"]
             errors = errors.append(pd.Series(results2["errors"], index=errors.columns ), ignore_index=True)
         j += 1
 
