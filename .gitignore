@@ -31,7 +31,7 @@ UQ/UQ_toolbox
 LSTM/*.p
 LSTM/.p*
 
-SIR/Sensitivity Analysis.ipynb
+# SIR/Sensitivity Analysis.ipynb
 
 .ipynb_checkpoints
 
@@ -41,3 +41,4 @@ covsirphy/
 covsirphy/*
 ./covsirphy
 ./covsirphy/*
+SIR/*.ipynb
