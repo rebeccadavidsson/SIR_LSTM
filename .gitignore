@@ -34,6 +34,7 @@ LSTM/.p*
 # SIR/Sensitivity Analysis.ipynb
 
 .ipynb_checkpoints
+__pycache__/
 
 covsirphy
 covsirphy/
@@ -42,3 +43,4 @@ covsirphy/*
 ./covsirphy
 ./covsirphy/*
 SIR/*.ipynb
+
